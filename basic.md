@@ -281,6 +281,7 @@ In addition to this, TeleBASIC allows for creation of multi-dimensional arrays, 
 - [`CINT(n)`](#cintn)  Returns the nearest integer of the specified value
 - [`CIRCLE`](#circle)  Currently not implemented, does nothing
 - [`COLOR(a, b)`](#colora-b)  Changes the colours of the terminal
+- [`CONT`](#cont)    Continue execution after STOP, END, Control-C, or runtime error
 - [`COS(n)`](#cosn)  Returns the trigonometric cosine of the angle `n` (in radians)
 - [`CSNG(n)`](#csngn)  Convert a specified value `n` to a single precision number
 
@@ -397,6 +398,7 @@ In addition to this, TeleBASIC allows for creation of multi-dimensional arrays, 
 - [`STOP`](#stop)  Halts the program and prints the current line
 - [`STR$(n)`](#strn)  Returns `n` as a string value
 - [`STRING$(n, s$)`](#stringn-s)  Repeats the string `s$` `n` times
+- [`SYS`](#sys)  HP2000 Access BASIC system information
 - [`SYSTEM`](#end)  End program execution silently, without additional output
 
 #### T
@@ -604,6 +606,53 @@ Changes the background `b` and/or foreground `a` colour of the terminal
 ```
 _Prints `Hello` with blue `b` background and yellow `a` foreground text.  A list of possible colours can be found with the command `SHOW COLORS`._
 
+### `CONT`
+
+Continue execution at the statement after STOP, END, Control-C, or runtime error.
+
+```
+>10 print 123 : STOP : print 456
+>run
+ 1
+
+   10  print 123 : STOP : print 456
+                     ^
+STOP AT LINE 10
+>CONT
+ 456
+>10 STOP
+>20 print "back on track"
+>run
+
+   10  STOP
+           ^
+STOP AT LINE 10
+>cont
+back on track
+```
+
+Another example:
+```
+> 10  for x = 5 to 10
+> 20    for y = 1 to 5
+> 30      print 10 / (x-y)
+> 40    next y
+> 50  next x
+>run
+ 2.500
+ 3.333
+ 5
+ 10
+
+   30  print 10 / (x-y)
+                       ^
+DIVISION BY ZERO AT LINE 30
+
+>  print "This caused a problem:" x, y
+This caused a problem: 5              5
+>  print "At line " sys(1)
+At line 30
+```
 
 ### `COS(n)`
 
@@ -908,6 +957,11 @@ Shows the default prompt and reads input from the user and saves it into `var$`.
 20  PRINT A$
 ```
 
+The builtin `INPUT$` variable has a similar effect, but can be used inside expressions:
+```
+10  NEVERLEN = LEN(INPUT$)
+20  PRINT "You would have won if you had typed" ( 1 + NEVERLEN ) "letters"
+```
 
 ### `INPUT "prompt", var$`
 
@@ -1089,13 +1143,13 @@ Returns the natural logarithm of `n` using 10 as the base (decimal).
 ```
 
 
-### `MID$(s$, n, [l])`
+### `MID$(s$, [n], [l])`
 
 Returns a substring of `l` characters from `s$` beginning with the `n`th character (indexed from 1)
 
 If `l` is omitted or zero, the rest of the string is returned. If `l` is negative, the end of the substring is indexed relative to the end of the string
 
-If `n` is zero or negative, the start of the substring is indexed relative to the end of the string
+If `n` is omitted, zero, or negative, the start of the substring is indexed relative to the end of the string.
 
 
 ```
@@ -1104,12 +1158,16 @@ If `n` is zero or negative, the start of the substring is indexed relative to th
 30  PRINT MID$(A$,3)
 40  PRINT MID$(A$,3,-3)
 50  PRINT MID$(A$,-3,3)
+60  PRINT MID$(A$), MID$(A$,LEN(A$))
+70  PRINT MID$(A$,-1)
 ```
 ```
 llo
 llo World
 llo Wo
 orl
+d              d
+ld             ld
 ```
 
 _See also [`LEFT$`](#lefts-n) and [`RIGHT$`](#rights-n)_
@@ -1186,6 +1244,23 @@ Jump conditionally with [`GOTO`](#goto-linenumber)/[`GOSUB`](#gosub-linenumber),
 Goto 200, will jump here
 ```
 
+If `NUMBER% <= 0`, the operation is a no-op. Generally `NUMBER%` is rounded down to nearest integer, but if `0 < NUMBER% < 1`, it will be rounded up instead.
+```
+10 number% = 3.5
+20 ON number% GOTO 100, 200, 300
+30 PRINT number% "did not invoke GOTO" : END
+100 PRINT number%, ": GOTO 100" : number% = number% - 0.5 : GOTO 20
+200 PRINT number%, ": GOTO 200" : number% = number% - 1   : GOTO 20
+300 PRINT number%, ": GOTO 300" : number% = number% - 1   : GOTO 20
+```
+```
+ 3.500         : GOTO 300
+ 2.500         : GOTO 200
+ 1.500         : GOTO 100
+ 1             : GOTO 100
+ 0.500         : GOTO 100
+ 0 did not invoke GOTO
+```
 
 ### `PCLEAR0`
 
@@ -1236,6 +1311,9 @@ Returns one character read from the terminal. When no key is hit within `n` seco
 10  A$ = POLKEY$(5)
 20  REM This will wait 5 seconds, waiting for user input
 30  PRINT A$
+40  B$ = POLKEY$
+50  REM The default wait is 1 second.
+60  PRINT B$
 ```
 
 
@@ -1297,6 +1375,12 @@ _`&` and `?` are available aliases for `PRINT`_
 
 _Adding a `;` at the end of `PRINT` will suppress the newline_
 
+When `PRINT` is immediately followed by `@[n],`, the entire line is indented by `n` spaces:
+```
+> n = 9
+> & @n, "nicely indented"
+         nicely indented
+```
 
 ### `PRINT #fileNumber[,recordNumber]; expression`
 
@@ -1443,6 +1527,24 @@ World
 
 _See also [`LEFT$`](#lefts-n) and [`MID$`](#mids-n-l)_
 
+`RIGHT$(s$,n)` has peculiar semantics when `LEN(s$) < n < 2*LEN(s$)`; if you want *up to `n`* characters and can guarantee `n > 0`, you may want to use [`MID$(s$, 1-n)`](#mids-n-l) instead:
+```
+> FOR i = 1 TO 14: PRINT i, RIGHT$("ABCDEF", i), MID$("ABCDEF",1-i): NEXT
+ 1             F              F
+ 2             EF             EF
+ 3             DEF            DEF
+ 4             CDEF           CDEF
+ 5             BCDEF          BCDEF
+ 6             ABCDEF         ABCDEF
+ 7             F              ABCDEF
+ 8             EF             ABCDEF
+ 9             DEF            ABCDEF
+ 10            CDEF           ABCDEF
+ 11            BCDEF          ABCDEF
+ 12            ABCDEF         ABCDEF
+ 13            ABCDEF         ABCDEF
+ 14            ABCDEF         ABCDEF
+```
 
 ### `RND(n)`
 
@@ -1595,6 +1697,15 @@ Repeats the string `s$` `n` times
 AAAAAAAAAA
 ```
 
+### `SYS(n)`
+
+HP2000 Access BASIC system information (compatibility function).
+
+0. Last error code (or 0). Not implemented.
+1. Last error line number or 0.
+2. Last file number accessed or `0` (tty) or `-1` (none). Not implemented.
+3. Returns 1 if BREAK key pressed. Not implemented.
+4. Returns terminal type (always `0` for tty).
 
 ### `TAB(n)`, `TAB$(n)`
 
@@ -1762,7 +1873,7 @@ Returns the current UNIX timestamp
 
 ### `TH_LOCALTIME[$]`
 
-Returns a human-readable local time for the given UNIX timestamp.
+Returns a human-readable timestamp for the given UNIX timestamp, in the user's timezone.
 
 ```
 10  PRINT TH_LOCALTIME$(TH_TIME)
